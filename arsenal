@@ -1,0 +1,212 @@
+-- Ensure Rayfield is loaded
+local success, Rayfield = pcall(function()
+    return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+end)
+
+if not success then
+    print("Failed to load Rayfield: " .. tostring(Rayfield))
+    return
+end
+
+print("Rayfield loaded successfully")
+
+-- Create Window
+local Window = Rayfield:CreateWindow({
+    Name = "Mistvale Arsenal",
+    Icon = 0,
+    LoadingTitle = "",
+    LoadingSubtitle = "By Mistvale",
+    Theme = "Default",
+    DisableRayfieldPrompts = false,
+    DisableBuildWarnings = false,
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = nil,
+        FileName = "Mistvale arsenalui"
+    },
+    Discord = {
+        Enabled = true,
+        Invite = "EwK7gS9z",
+        RememberJoins = true
+    },
+    KeySystem = true,
+    KeySettings = {
+        Title = "Mistvale Arsenal",
+        Subtitle = "Key System",
+        Note = "Join Discord",
+        FileName = "Mistvale arsenal",
+        SaveKey = true,
+        GrabKeyFromSite = true,
+        Key = {"https://pastebin.com/raw/JCe6DPN5"}
+    }
+})
+
+-- Tabs
+local MainTab = Window:CreateTab("Aim")
+local MiscTab = Window:CreateTab("Misc")
+
+-- Variables
+local isAimbotEnabled = false
+local isESPEnabled = false
+local fovRadius = 100
+local espDrawings = {}
+local currentTarget = nil
+
+-- FOV Circle
+local fovCircle = Drawing.new("Circle")
+fovCircle.Visible = false
+fovCircle.Thickness = 2
+fovCircle.Color = Color3.fromRGB(255, 255, 0)
+fovCircle.Transparency = 1
+fovCircle.NumSides = 64
+
+-- Buttons
+MainTab:CreateButton({
+    Name = "Toggle Aimbot",
+    Callback = function()
+        isAimbotEnabled = not isAimbotEnabled
+        print(isAimbotEnabled and "Aimbot enabled" or "Aimbot disabled")
+    end,
+})
+
+MiscTab:CreateButton({
+    Name = "Toggle ESP",
+    Callback = function()
+        isESPEnabled = not isESPEnabled
+        print(isESPEnabled and "ESP enabled" or "ESP disabled")
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "FOV Radius",
+    Range = {10, 300},
+    Increment = 1,
+    Suffix = "Radius",
+    CurrentValue = fovRadius,
+    Callback = function(Value)
+        fovRadius = Value
+        print("FOV radius set to: " .. Value)
+    end,
+})
+
+-- Helper Functions
+local function isEnemy(player)
+    local localPlayer = game.Players.LocalPlayer
+    if player.Team == localPlayer.Team then
+        return false -- Same team
+    end
+    if localPlayer:IsFriendsWith(player.UserId) then
+        return false -- Is a friend
+    end
+    return true -- Considered an enemy
+end
+
+local function canSeeTarget(target)
+    local character = game.Players.LocalPlayer.Character
+    if not character then return false end
+
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    local targetCharacter = target.Character
+    if humanoidRootPart and targetCharacter then
+        local targetHead = targetCharacter:FindFirstChild("Head")
+        if targetHead then
+            local direction = (targetHead.Position - humanoidRootPart.Position).Unit
+            local ray = Ray.new(humanoidRootPart.Position, direction * 1000)
+            local hitPart = workspace:FindPartOnRay(ray, character)
+            return hitPart and hitPart:IsDescendantOf(targetCharacter)
+        end
+    end
+    return false
+end
+
+local function getClosestTarget()
+    local player = game.Players.LocalPlayer
+    local closestTarget = nil
+    local shortestDistance = math.huge
+
+    for _, target in ipairs(game.Players:GetPlayers()) do
+        if target ~= player and target.Character and target.Character:FindFirstChild("Head") and isEnemy(target) then
+            local targetHead = target.Character.Head
+            local screenPos = workspace.CurrentCamera:WorldToViewportPoint(targetHead.Position)
+            local distance = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(fovCircle.Position.X, fovCircle.Position.Y)).Magnitude
+
+            if distance <= fovRadius and canSeeTarget(target) and distance < shortestDistance then
+                shortestDistance = distance
+                closestTarget = target
+            end
+        end
+    end
+
+    return closestTarget
+end
+
+local function aimAtTarget(target)
+    if target and target.Character and target.Character:FindFirstChild("Head") then
+        local cam = workspace.CurrentCamera
+        cam.CFrame = CFrame.new(cam.CFrame.Position, target.Character.Head.Position)
+    end
+end
+
+local function updateESP()
+    for _, player in ipairs(game.Players:GetPlayers()) do
+        if player ~= game.Players.LocalPlayer and isEnemy(player) then
+            local head = player.Character and player.Character:FindFirstChild("Head")
+            if head then
+                if not espDrawings[player] then
+                    espDrawings[player] = Drawing.new("Circle")
+                    espDrawings[player].Color = Color3.fromRGB(255, 255, 0) -- Yellow
+                    espDrawings[player].Radius = 5
+                    espDrawings[player].Thickness = 2
+                    espDrawings[player].Filled = true
+                    espDrawings[player].Visible = false
+                end
+
+                local screenPos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(head.Position)
+                espDrawings[player].Visible = isESPEnabled and onScreen
+                if onScreen then
+                    espDrawings[player].Position = Vector2.new(screenPos.X, screenPos.Y)
+                end
+            elseif espDrawings[player] then
+                espDrawings[player]:Remove()
+                espDrawings[player] = nil
+            end
+        elseif espDrawings[player] then
+            espDrawings[player]:Remove()
+            espDrawings[player] = nil
+        end
+    end
+end
+
+-- Cleanup on Player Leave
+game.Players.PlayerRemoving:Connect(function(player)
+    if espDrawings[player] then
+        espDrawings[player]:Remove()
+        espDrawings[player] = nil
+    end
+end)
+
+-- Main Loop
+game:GetService("RunService").RenderStepped:Connect(function()
+    -- Update FOV Circle
+    fovCircle.Visible = isAimbotEnabled
+    fovCircle.Position = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y / 2)
+    fovCircle.Radius = fovRadius
+
+    -- Aimbot Logic
+    if isAimbotEnabled then
+        currentTarget = getClosestTarget()
+        if currentTarget then
+            aimAtTarget(currentTarget)
+        end
+    end
+
+    -- Update ESP
+    updateESP()
+end)
+
+Rayfield:Notify({
+    Title = "Script Loaded Successfully!",
+    Content = "Join Discord For Updates",
+    Duration = 3,
+    Image = "rewind",
+ })
