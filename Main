@@ -1,3 +1,5 @@
-if game.PlaceId == 286090429 then 
-https://raw.githubusercontent.com/ewfuweofhweoui/Mistvale/refs/heads/main/arsenal
+if game.PlaceId == 286090429 then
+    local url = "https://raw.githubusercontent.com/ewfuweofhweoui/Mistvale/main/arsenal"
+    local scriptContent = game:HttpGet(url)
+    loadstring(scriptContent)()
 end
