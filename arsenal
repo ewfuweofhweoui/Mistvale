@@ -13,200 +13,426 @@ print("Rayfield loaded successfully")
 -- Create Window
 local Window = Rayfield:CreateWindow({
     Name = "Mistvale Arsenal",
-    Icon = 0,
-    LoadingTitle = "",
-    LoadingSubtitle = "By Mistvale",
-    Theme = "Default",
-    DisableRayfieldPrompts = false,
-    DisableBuildWarnings = false,
+    LoadingTitle = "Arsenal Script",
+    LoadingSubtitle = "by Mistvale",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = nil,
-        FileName = "Mistvale arsenalui"
-    },
-    Discord = {
-        Enabled = true,
-        Invite = "EwK7gS9z",
-        RememberJoins = true
+        FileName = "MistvaleArsenal"
     },
     KeySystem = true,
     KeySettings = {
         Title = "Mistvale Arsenal",
         Subtitle = "Key System",
-        Note = "Join Discord",
-        FileName = "Mistvale arsenal",
+        Note = "Join Discord for key",
+        FileName = "MistvaleKey",
         SaveKey = true,
         GrabKeyFromSite = true,
         Key = {"https://pastebin.com/raw/JCe6DPN5"}
     }
 })
 
--- Tabs
-local MainTab = Window:CreateTab("Aim")
-local MiscTab = Window:CreateTab("Misc")
+-- Configuration
+local Config = {
+    Aimbot = {
+        Enabled = false,
+        FOV = 100
+    },
+    TriggerBot = {
+        Enabled = false
+    },
+    ESP = {
+        Enabled = false,
+        BoxesEnabled = true,
+        TracersEnabled = true,
+        NamesEnabled = true,
+        DistanceEnabled = true,
+        TeamCheck = true,
+        BoxColor = Color3.fromRGB(255, 0, 0),
+        TracerColor = Color3.fromRGB(255, 255, 255),
+        TextColor = Color3.fromRGB(255, 255, 255)
+    }
+}
 
--- Variables
-local isAimbotEnabled = false
-local isESPEnabled = false
-local fovRadius = 100
-local espDrawings = {}
-local currentTarget = nil
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
 
 -- FOV Circle
-local fovCircle = Drawing.new("Circle")
-fovCircle.Visible = false
-fovCircle.Thickness = 2
-fovCircle.Color = Color3.fromRGB(255, 255, 0)
-fovCircle.Transparency = 1
-fovCircle.NumSides = 64
+local AimbotFOV = Drawing.new("Circle")
+AimbotFOV.Thickness = 2
+AimbotFOV.NumSides = 64
+AimbotFOV.Radius = Config.Aimbot.FOV
+AimbotFOV.Filled = false
+AimbotFOV.Visible = false
+AimbotFOV.ZIndex = 999
+AimbotFOV.Transparency = 1
+AimbotFOV.Color = Color3.fromRGB(255, 255, 255)
 
--- Buttons
-MainTab:CreateButton({
-    Name = "Toggle Aimbot",
-    Callback = function()
-        isAimbotEnabled = not isAimbotEnabled
-        print(isAimbotEnabled and "Aimbot enabled" or "Aimbot disabled")
-    end,
-})
+-- ESP Containers
+local ESPContainer = {}
 
-MiscTab:CreateButton({
-    Name = "Toggle ESP",
-    Callback = function()
-        isESPEnabled = not isESPEnabled
-        print(isESPEnabled and "ESP enabled" or "ESP disabled")
-    end,
-})
-
-MainTab:CreateSlider({
-    Name = "FOV Radius",
-    Range = {10, 300},
-    Increment = 1,
-    Suffix = "Radius",
-    CurrentValue = fovRadius,
-    Callback = function(Value)
-        fovRadius = Value
-        print("FOV radius set to: " .. Value)
-    end,
-})
-
--- Helper Functions
-local function isEnemy(player)
-    local localPlayer = game.Players.LocalPlayer
-    if player.Team == localPlayer.Team then
-        return false -- Same team
-    end
-    if localPlayer:IsFriendsWith(player.UserId) then
-        return false -- Is a friend
-    end
-    return true -- Considered an enemy
+-- Functions
+local function IsEnemy(player)
+    if not Config.ESP.TeamCheck then return true end
+    return player.Team ~= LocalPlayer.Team
 end
 
-local function canSeeTarget(target)
-    local character = game.Players.LocalPlayer.Character
+local function GetCharacter(player)
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and 
+       player.Character:FindFirstChild("Humanoid") and player.Character:FindFirstChild("Head") then
+        return player.Character
+    end
+    return nil
+end
+
+local function IsVisible(character)
     if not character then return false end
-
-    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-    local targetCharacter = target.Character
-    if humanoidRootPart and targetCharacter then
-        local targetHead = targetCharacter:FindFirstChild("Head")
-        if targetHead then
-            local direction = (targetHead.Position - humanoidRootPart.Position).Unit
-            local ray = Ray.new(humanoidRootPart.Position, direction * 1000)
-            local hitPart = workspace:FindPartOnRay(ray, character)
-            return hitPart and hitPart:IsDescendantOf(targetCharacter)
-        end
-    end
-    return false
+    
+    local origin = workspace.CurrentCamera.CFrame.Position
+    local ray = Ray.new(origin, character.Head.Position - origin)
+    local hit = workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, character})
+    
+    return hit == nil
 end
 
-local function getClosestTarget()
-    local player = game.Players.LocalPlayer
-    local closestTarget = nil
-    local shortestDistance = math.huge
+local function GetClosestPlayer(FOV)
+    local ClosestPlayer = nil
+    local ShortestDistance = FOV
 
-    for _, target in ipairs(game.Players:GetPlayers()) do
-        if target ~= player and target.Character and target.Character:FindFirstChild("Head") and isEnemy(target) then
-            local targetHead = target.Character.Head
-            local screenPos = workspace.CurrentCamera:WorldToViewportPoint(targetHead.Position)
-            local distance = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(fovCircle.Position.X, fovCircle.Position.Y)).Magnitude
+    local MousePos = UserInputService:GetMouseLocation()
 
-            if distance <= fovRadius and canSeeTarget(target) and distance < shortestDistance then
-                shortestDistance = distance
-                closestTarget = target
+    for _, Player in pairs(Players:GetPlayers()) do
+        if Player ~= LocalPlayer and IsEnemy(Player) then
+            local Character = GetCharacter(Player)
+            if Character and Character.Humanoid.Health > 0 and IsVisible(Character) then
+                local ScreenPos, OnScreen = workspace.CurrentCamera:WorldToViewportPoint(Character.Head.Position)
+                
+                if OnScreen then
+                    local Distance = (Vector2.new(MousePos.X, MousePos.Y) - Vector2.new(ScreenPos.X, ScreenPos.Y)).Magnitude
+                    if Distance < ShortestDistance then
+                        ShortestDistance = Distance
+                        ClosestPlayer = Player
+                    end
+                end
             end
         end
     end
 
-    return closestTarget
+    return ClosestPlayer
 end
 
-local function aimAtTarget(target)
-    if target and target.Character and target.Character:FindFirstChild("Head") then
-        local cam = workspace.CurrentCamera
-        cam.CFrame = CFrame.new(cam.CFrame.Position, target.Character.Head.Position)
-    end
+-- ESP Functions
+local function CreateESP(player)
+    local ESP = {
+        Box = Drawing.new("Square"),
+        BoxOutline = Drawing.new("Square"),
+        Tracer = Drawing.new("Line"),
+        Name = Drawing.new("Text"),
+        Distance = Drawing.new("Text")
+    }
+    
+    -- Box Outline Settings
+    ESP.BoxOutline.Thickness = 3
+    ESP.BoxOutline.Filled = false
+    ESP.BoxOutline.Color = Color3.fromRGB(0, 0, 0)
+    ESP.BoxOutline.Visible = false
+    ESP.BoxOutline.ZIndex = 1
+    
+    -- Box Settings
+    ESP.Box.Thickness = 1
+    ESP.Box.Filled = false
+    ESP.Box.Color = Config.ESP.BoxColor
+    ESP.Box.Visible = false
+    ESP.Box.ZIndex = 2
+    
+    -- Tracer Settings
+    ESP.Tracer.Thickness = 1
+    ESP.Tracer.Color = Config.ESP.TracerColor
+    ESP.Tracer.Visible = false
+    
+    -- Name Settings
+    ESP.Name.Size = 14
+    ESP.Name.Center = true
+    ESP.Name.Outline = true
+    ESP.Name.Color = Config.ESP.TextColor
+    ESP.Name.Visible = false
+    
+    -- Distance Settings
+    ESP.Distance.Size = 14
+    ESP.Distance.Center = true
+    ESP.Distance.Outline = true
+    ESP.Distance.Color = Config.ESP.TextColor
+    ESP.Distance.Visible = false
+    
+    ESPContainer[player] = ESP
 end
 
-local function updateESP()
-    for _, player in ipairs(game.Players:GetPlayers()) do
-        if player ~= game.Players.LocalPlayer and isEnemy(player) then
-            local head = player.Character and player.Character:FindFirstChild("Head")
-            if head then
-                if not espDrawings[player] then
-                    espDrawings[player] = Drawing.new("Circle")
-                    espDrawings[player].Color = Color3.fromRGB(255, 255, 0) -- Yellow
-                    espDrawings[player].Radius = 5
-                    espDrawings[player].Thickness = 2
-                    espDrawings[player].Filled = true
-                    espDrawings[player].Visible = false
+local function UpdateESP()
+    for player, esp in pairs(ESPContainer) do
+        local character = GetCharacter(player)
+        if character then
+            local rootPos = character.HumanoidRootPart.Position
+            local headPos = character.Head.Position
+            local pos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(rootPos)
+            
+            if onScreen and Config.ESP.Enabled and IsEnemy(player) then
+                local TopPosV3 = headPos + Vector3.new(0, 1, 0)
+                local BottomPosV3 = rootPos - Vector3.new(0, 3, 0)
+                
+                local TopPos, _ = workspace.CurrentCamera:WorldToViewportPoint(TopPosV3)
+                local BottomPos, _ = workspace.CurrentCamera:WorldToViewportPoint(BottomPosV3)
+                
+                local BoxHeight = math.abs(TopPos.Y - BottomPos.Y)
+                local BoxWidth = BoxHeight * 0.6
+                local BoxPos = Vector2.new(TopPos.X - BoxWidth/2, TopPos.Y)
+                
+                -- Update Box and Outline
+                if Config.ESP.BoxesEnabled then
+                    esp.BoxOutline.Size = Vector2.new(BoxWidth, BoxHeight)
+                    esp.BoxOutline.Position = BoxPos
+                    esp.BoxOutline.Visible = true
+                    
+                    esp.Box.Size = Vector2.new(BoxWidth, BoxHeight)
+                    esp.Box.Position = BoxPos
+                    esp.Box.Color = Config.ESP.BoxColor
+                    esp.Box.Visible = true
+                else
+                    esp.BoxOutline.Visible = false
+                    esp.Box.Visible = false
                 end
-
-                local screenPos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(head.Position)
-                espDrawings[player].Visible = isESPEnabled and onScreen
-                if onScreen then
-                    espDrawings[player].Position = Vector2.new(screenPos.X, screenPos.Y)
+                
+                -- Update Tracer
+                if Config.ESP.TracersEnabled then
+                    esp.Tracer.From = Vector2.new(workspace.CurrentCamera.ViewportSize.X/2, workspace.CurrentCamera.ViewportSize.Y)
+                    esp.Tracer.To = Vector2.new(BottomPos.X, BottomPos.Y)
+                    esp.Tracer.Color = Config.ESP.TracerColor
+                    esp.Tracer.Visible = true
+                else
+                    esp.Tracer.Visible = false
                 end
-            elseif espDrawings[player] then
-                espDrawings[player]:Remove()
-                espDrawings[player] = nil
+                
+                -- Update Name
+                if Config.ESP.NamesEnabled then
+                    esp.Name.Position = Vector2.new(TopPos.X, BoxPos.Y - 16)
+                    esp.Name.Text = player.Name
+                    esp.Name.Color = Config.ESP.TextColor
+                    esp.Name.Visible = true
+                else
+                    esp.Name.Visible = false
+                end
+                
+                -- Update Distance
+                if Config.ESP.DistanceEnabled then
+                    local distance = (rootPos - workspace.CurrentCamera.CFrame.Position).Magnitude
+                    esp.Distance.Position = Vector2.new(BottomPos.X, BottomPos.Y + 2)
+                    esp.Distance.Text = math.floor(distance) .. " studs"
+                    esp.Distance.Color = Config.ESP.TextColor
+                    esp.Distance.Visible = true
+                else
+                    esp.Distance.Visible = false
+                end
+            else
+                esp.BoxOutline.Visible = false
+                esp.Box.Visible = false
+                esp.Tracer.Visible = false
+                esp.Name.Visible = false
+                esp.Distance.Visible = false
             end
-        elseif espDrawings[player] then
-            espDrawings[player]:Remove()
-            espDrawings[player] = nil
+        else
+            esp.BoxOutline.Visible = false
+            esp.Box.Visible = false
+            esp.Tracer.Visible = false
+            esp.Name.Visible = false
+            esp.Distance.Visible = false
         end
     end
 end
 
--- Cleanup on Player Leave
-game.Players.PlayerRemoving:Connect(function(player)
-    if espDrawings[player] then
-        espDrawings[player]:Remove()
-        espDrawings[player] = nil
+-- Create Tabs
+local AimTab = Window:CreateTab("Aim")
+local VisualsTab = Window:CreateTab("Visuals")
+
+-- Aim Tab
+AimTab:CreateToggle({
+    Name = "Aimbot",
+    CurrentValue = false,
+    Flag = "AimbotEnabled",
+    Callback = function(Value)
+        Config.Aimbot.Enabled = Value
+    end,
+})
+
+
+AimTab:CreateSlider({
+    Name = "FOV",
+    Range = {10, 500},
+    Increment = 1,
+    Suffix = "",
+    CurrentValue = Config.Aimbot.FOV,
+    Flag = "AimbotFOV",
+    Callback = function(Value)
+        Config.Aimbot.FOV = Value
+        AimbotFOV.Radius = Value
+    end,
+})
+
+-- Visuals Tab
+VisualsTab:CreateToggle({
+    Name = "ESP Enabled",
+    CurrentValue = false,
+    Flag = "ESPEnabled",
+    Callback = function(Value)
+        Config.ESP.Enabled = Value
+    end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Boxes",
+    CurrentValue = true,
+    Flag = "BoxesEnabled",
+    Callback = function(Value)
+        Config.ESP.BoxesEnabled = Value
+    end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Tracers",
+    CurrentValue = true,
+    Flag = "TracersEnabled",
+    Callback = function(Value)
+        Config.ESP.TracersEnabled = Value
+    end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Names",
+    CurrentValue = true,
+    Flag = "NamesEnabled",
+    Callback = function(Value)
+        Config.ESP.NamesEnabled = Value
+    end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Distance",
+    CurrentValue = true,
+    Flag = "DistanceEnabled",
+    Callback = function(Value)
+        Config.ESP.DistanceEnabled = Value
+    end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Team Check",
+    CurrentValue = true,
+    Flag = "TeamCheck",
+    Callback = function(Value)
+        Config.ESP.TeamCheck = Value
+    end,
+})
+
+-- Colors
+VisualsTab:CreateColorPicker({
+    Name = "Box Color",
+    Color = Config.ESP.BoxColor,
+    Flag = "BoxColor",
+    Callback = function(Value)
+        Config.ESP.BoxColor = Value
+    end,
+})
+
+VisualsTab:CreateColorPicker({
+    Name = "Tracer Color",
+    Color = Config.ESP.TracerColor,
+    Flag = "TracerColor",
+    Callback = function(Value)
+        Config.ESP.TracerColor = Value
+    end,
+})
+
+VisualsTab:CreateColorPicker({
+    Name = "Text Color",
+    Color = Config.ESP.TextColor,
+    Flag = "TextColor",
+    Callback = function(Value)
+        Config.ESP.TextColor = Value
+    end,
+})
+
+-- ESP Player Adding/Removing
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer then
+        CreateESP(player)
     end
 end)
+
+Players.PlayerRemoving:Connect(function(player)
+    if ESPContainer[player] then
+        for _, drawing in pairs(ESPContainer[player]) do
+            drawing:Remove()
+        end
+        ESPContainer[player] = nil
+    end
+end)
+
+-- Initialize ESP for existing players
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        CreateESP(player)
+    end
+end
 
 -- Main Loop
-game:GetService("RunService").RenderStepped:Connect(function()
+RunService.RenderStepped:Connect(function()
     -- Update FOV Circle
-    fovCircle.Visible = isAimbotEnabled
-    fovCircle.Position = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y / 2)
-    fovCircle.Radius = fovRadius
-
-    -- Aimbot Logic
-    if isAimbotEnabled then
-        currentTarget = getClosestTarget()
-        if currentTarget then
-            aimAtTarget(currentTarget)
+    local MousePos = UserInputService:GetMouseLocation()
+    AimbotFOV.Position = MousePos
+    AimbotFOV.Visible = Config.Aimbot.Enabled
+    
+    -- Aimbot
+    if Config.Aimbot.Enabled then
+        local target = GetClosestPlayer(Config.Aimbot.FOV)
+        if target then
+            local character = GetCharacter(target)
+            if character then
+                workspace.CurrentCamera.CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, 
+                    character.Head.Position)
+            end
         end
     end
+    
 
+    
     -- Update ESP
-    updateESP()
+    UpdateESP()
 end)
 
+-- Cleanup when script stops
+local function CleanupDrawings()
+    AimbotFOV:Remove()
+    
+    for _, esp in pairs(ESPContainer) do
+        for _, drawing in pairs(esp) do
+            drawing:Remove()
+        end
+    end
+end
+
+game:GetService("CoreGui").ChildRemoved:Connect(function(child)
+    if child.Name == "Rayfield" then
+        CleanupDrawings()
+    end
+end)
+
+
+
+-- Load notification
 Rayfield:Notify({
-    Title = "Script Loaded Successfully!",
-    Content = "Join Discord For Updates",
+    Title = "Script Loaded",
+    Content = "Arsenal script is ready",
     Duration = 3,
-    Image = "rewind",
- })
+    Image = 4483362458
+})
