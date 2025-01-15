@@ -1,0 +1,249 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local players = game:GetService("Players")
+local runService = game:GetService("RunService")
+local userInputService = game:GetService("UserInputService")
+local client = players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+local Window = Rayfield:CreateWindow({
+    Name = "Rivals",
+    LoadingTitle = "Rivals Script",
+    LoadingSubtitle = "by You",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = nil,
+        FileName = "RivalsConfig"
+    }
+})
+
+local Config = {
+    Aimbot = {
+        Enabled = false,
+        FOV = 100,
+        AimPart = "Head",
+        Prediction = 0.165
+    },
+    ESP = {
+        Enabled = false,
+        BoxesEnabled = true,
+        NamesEnabled = true,
+        BoxColor = Color3.fromRGB(255, 0, 0),
+        TextColor = Color3.fromRGB(255, 255, 255)
+    }
+}
+
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2
+FOVCircle.NumSides = 64
+FOVCircle.Radius = Config.Aimbot.FOV
+FOVCircle.Filled = false
+FOVCircle.Visible = false
+FOVCircle.ZIndex = 999
+FOVCircle.Transparency = 1
+FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+
+local function IsTargetVisible(targetPart)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {client.Character, targetPart.Parent}
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    local rayDirection = (targetPart.Position - camera.CFrame.Position).Unit
+    local rayOrigin = camera.CFrame.Position
+    
+    local rayResult = workspace:Raycast(rayOrigin, rayDirection * 1000, rayParams)
+    return rayResult == nil
+end
+
+local function GetClosestPlayerToCursor()
+    local closestPlayer = nil
+    local shortestDistance = Config.Aimbot.FOV
+    local mousePos = userInputService:GetMouseLocation()
+
+    for _, player in pairs(players:GetPlayers()) do
+        if player ~= client and 
+           player.Character and 
+           player.Character:FindFirstChild(Config.Aimbot.AimPart) and 
+           player.Character:FindFirstChild("Humanoid") and 
+           player.Character.Humanoid.Health > 0 then
+            
+            local targetPart = player.Character[Config.Aimbot.AimPart]
+            local screenPoint = camera:WorldToViewportPoint(targetPart.Position)
+            
+            if screenPoint.Z > 0 then
+                local vectorDistance = (Vector2.new(mousePos.X, mousePos.Y) - Vector2.new(screenPoint.X, screenPoint.Y)).Magnitude
+                
+                if vectorDistance < shortestDistance then
+                    closestPlayer = player
+                    shortestDistance = vectorDistance
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+runService.Heartbeat:Connect(function()
+    FOVCircle.Position = userInputService:GetMouseLocation()
+    FOVCircle.Visible = Config.Aimbot.Enabled
+
+    if Config.Aimbot.Enabled and userInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+        local target = GetClosestPlayerToCursor()
+        if target and target.Character and target.Character:FindFirstChild(Config.Aimbot.AimPart) then
+            local targetPart = target.Character[Config.Aimbot.AimPart]
+            local targetPos = targetPart.Position + (targetPart.Velocity * Config.Aimbot.Prediction)
+            camera.CFrame = CFrame.new(camera.CFrame.Position, targetPos)
+        end
+    end
+end)
+
+local espObjects = {}
+
+local function CreateESPBox(player)
+    local esp = {
+        Box = Drawing.new("Square"),
+        Name = Drawing.new("Text"),
+        Player = player
+    }
+    
+    esp.Box.Visible = false
+    esp.Box.Color = Config.ESP.BoxColor
+    esp.Box.Thickness = 1
+    esp.Box.Filled = false
+    esp.Box.Transparency = 1
+
+    esp.Name.Visible = false
+    esp.Name.Color = Config.ESP.TextColor
+    esp.Name.Size = 14
+    esp.Name.Center = true
+    esp.Name.Outline = true
+
+    return esp
+end
+
+local function UpdateESP()    for _, esp in pairs(espObjects) do
+        if esp.Player.Character and esp.Player.Character:FindFirstChild("HumanoidRootPart") then
+            local rootPart = esp.Player.Character.HumanoidRootPart
+            local pos, onScreen = camera:WorldToViewportPoint(rootPart.Position)
+            
+            if onScreen and Config.ESP.Enabled then
+                local distance = (rootPart.Position - camera.CFrame.Position).Magnitude
+                local scaleFactor = 1 / (distance * 0.2)
+                local boxSize = Vector2.new(1000 * scaleFactor, 2000 * scaleFactor)
+                local boxPos = Vector2.new(pos.X - boxSize.X/2, pos.Y - boxSize.Y/2)
+
+                esp.Box.Size = boxSize
+                esp.Box.Position = boxPos
+                esp.Box.Visible = Config.ESP.BoxesEnabled
+
+                esp.Name.Position = Vector2.new(pos.X, boxPos.Y - 16)
+                esp.Name.Text = string.format("%s [%d]", esp.Player.Name, math.floor(distance))
+                esp.Name.Visible = Config.ESP.NamesEnabled
+            else
+                esp.Box.Visible = false
+                esp.Name.Visible = false
+            end
+        else
+            esp.Box.Visible = false
+            esp.Name.Visible = false
+        end
+    end
+end
+
+local CombatTab = Window:CreateTab("Combat")
+local VisualsTab = Window:CreateTab("Visuals")
+
+CombatTab:CreateToggle({
+    Name = "Aim Lock",
+    CurrentValue = false,
+    Flag = "AimLock",
+    Callback = function(Value)
+        Config.Aimbot.Enabled = Value
+    end,
+})
+
+CombatTab:CreateDropdown({
+    Name = "Aim Part",
+    Options = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"},
+    CurrentOption = Config.Aimbot.AimPart,
+    Flag = "AimPart",
+    Callback = function(Value)
+        Config.Aimbot.AimPart = Value
+    end,
+})
+
+CombatTab:CreateSlider({
+    Name = "FOV",
+    Range = {10, 500},
+    Increment = 1,
+    Suffix = "",
+    CurrentValue = Config.Aimbot.FOV,
+    Flag = "AimbotFOV",
+    Callback = function(Value)
+        Config.Aimbot.FOV = Value
+        FOVCircle.Radius = Value
+    end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "ESP",
+    CurrentValue = false,
+    Flag = "ESP",
+    Callback = function(Value)
+        Config.ESP.Enabled = Value
+    end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Boxes",
+    CurrentValue = true,
+    Flag = "Boxes",
+    Callback = function(Value)
+        Config.ESP.BoxesEnabled = Value
+    end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Names",
+    CurrentValue = true,
+    Flag = "Names",
+    Callback = function(Value)
+        Config.ESP.NamesEnabled = Value
+    end,
+})
+
+runService.Heartbeat:Connect(function()
+    FOVCircle.Position = userInputService:GetMouseLocation()
+    FOVCircle.Visible = Config.Aimbot.Enabled
+
+    if Config.Aimbot.Enabled and userInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+        local target = GetClosestPlayerToCursor()
+        if target and target.Character and target.Character:FindFirstChild(Config.Aimbot.AimPart) then
+            local targetPart = target.Character[Config.Aimbot.AimPart]
+            local targetPos = targetPart.Position
+            
+            -- Direct camera manipulation for instant response
+            local targetCFrame = CFrame.lookAt(camera.CFrame.Position, targetPos)
+            camera.CFrame = targetCFrame
+        end
+    end
+
+    UpdateESP()
+end)
+for _, player in pairs(players:GetPlayers()) do
+    if player ~= client then
+        espObjects[player] = CreateESPBox(player)
+    end
+end
+
+players.PlayerAdded:Connect(function(player)
+    espObjects[player] = CreateESPBox(player)
+end)
+
+players.PlayerRemoving:Connect(function(player)
+    if espObjects[player] then
+        espObjects[player].Box:Remove()
+        espObjects[player].Name:Remove()
+        espObjects[player] = nil
+    end
+end)
